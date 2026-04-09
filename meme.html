@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meme Maker Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+
+        .impact-font {
+            font-family: 'Impact', 'Anton', sans-serif;
+        }
+
+        canvas {
+            max-width: 100%;
+            height: auto;
+            border-radius: 12px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            background-color: #1e293b;
+        }
+
+        input[type="range"] {
+            accent-color: #6366f1;
+        }
+
+        /* Menghilangkan scrollbar default untuk tampilan yang lebih rapi */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-4 md:p-10">
+
+    <div class="max-w-5xl w-full">
+        <header class="mb-10 text-center">
+            <h1 class="text-5xl font-black text-white mb-2 impact-font tracking-wider uppercase italic">Meme Maker</h1>
+            <p class="text-slate-400 text-sm tracking-widest uppercase italic">Edit Cepat & Hasil Tajam</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+            <!-- Panel Kontrol -->
+            <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl space-y-6">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase mb-3 tracking-widest">1. Pilih Gambar</label>
+                    <input type="file" id="imageInput" accept="image/*" class="block w-full text-sm text-slate-400
+                        file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0
+                        file:text-sm file:font-semibold file:bg-indigo-600 file:text-white
+                        hover:file:bg-indigo-500 cursor-pointer transition-all">
+                </div>
+
+                <div class="space-y-4">
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest">2. Teks Meme</label>
+                    <div class="space-y-3">
+                        <input type="text" id="topText" placeholder="Teks Atas..." 
+                            class="w-full bg-slate-900 border border-slate-700 text-white px-4 py-4 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold impact-font text-xl placeholder:text-slate-700">
+                        <input type="text" id="bottomText" placeholder="Teks Bawah..." 
+                            class="w-full bg-slate-900 border border-slate-700 text-white px-4 py-4 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold impact-font text-xl placeholder:text-slate-700">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-3 text-center">Ukuran Font</label>
+                        <input type="range" id="fontSize" min="10" max="150" value="60" class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-3 text-center">Garis Tepi</label>
+                        <input type="range" id="strokeWidth" min="0" max="20" value="6" class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                </div>
+
+                <div class="pt-6 border-t border-slate-700 flex flex-col gap-4">
+                    <button id="downloadBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl transition-all shadow-lg shadow-indigo-900/40 uppercase tracking-widest text-sm">
+                        Download Meme (PNG)
+                    </button>
+                    <button id="resetBtn" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-3 rounded-xl transition-all uppercase text-[10px] tracking-widest">
+                        Hapus Semua
+                    </button>
+                </div>
+            </div>
+
+            <!-- Area Preview -->
+            <div class="flex flex-col items-center lg:sticky lg:top-10">
+                <div class="relative w-full aspect-square max-w-md bg-slate-800 p-2 rounded-xl border border-slate-700 overflow-hidden shadow-2xl flex items-center justify-center">
+                    <canvas id="memeCanvas" class="hidden"></canvas>
+                    <div id="emptyState" class="flex flex-col items-center justify-center text-slate-600 text-center p-10">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-20 w-20 mb-4 opacity-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <p class="font-bold uppercase tracking-widest text-xs opacity-30 italic">Pilih gambar untuk memulai</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('memeCanvas');
+        const ctx = canvas.getContext('2d');
+        const imageInput = document.getElementById('imageInput');
+        const topTextInput = document.getElementById('topText');
+        const bottomTextInput = document.getElementById('bottomText');
+        const fontSizeInput = document.getElementById('fontSize');
+        const strokeWidthInput = document.getElementById('strokeWidth');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const emptyState = document.getElementById('emptyState');
+
+        let currentImage = null;
+
+        function drawMeme() {
+            if (!currentImage) return;
+
+            // Set resolusi canvas (maksimalkan hingga 1000px agar tajam)
+            const maxWidth = 1000;
+            const ratio = Math.min(maxWidth / currentImage.width, 1);
+            canvas.width = currentImage.width * ratio;
+            canvas.height = currentImage.height * ratio;
+
+            // Gambar latar belakang
+            ctx.drawImage(currentImage, 0, 0, canvas.width, canvas.height);
+
+            // Pengaturan Font
+            const size = parseInt(fontSizeInput.value) * ratio;
+            const stroke = parseInt(strokeWidthInput.value) * ratio;
+            
+            ctx.font = `${size}px Impact, Anton, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'white';
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = stroke;
+            ctx.lineJoin = 'round';
+            ctx.miterLimit = 2;
+
+            const top = topTextInput.value;
+            const bottom = bottomTextInput.value;
+
+            // Gambar teks atas
+            if (top) {
+                ctx.textBaseline = 'top';
+                ctx.strokeText(top, canvas.width / 2, 20);
+                ctx.fillText(top, canvas.width / 2, 20);
+            }
+
+            // Gambar teks bawah
+            if (bottom) {
+                ctx.textBaseline = 'bottom';
+                ctx.strokeText(bottom, canvas.width / 2, canvas.height - 20);
+                ctx.fillText(bottom, canvas.width / 2, canvas.height - 20);
+            }
+        }
+
+        imageInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    currentImage = img;
+                    canvas.classList.remove('hidden');
+                    emptyState.classList.add('hidden');
+                    drawMeme();
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        });
+
+        [topTextInput, bottomTextInput, fontSizeInput, strokeWidthInput].forEach(i => i.addEventListener('input', drawMeme));
+
+        downloadBtn.addEventListener('click', () => {
+            if (!currentImage) return;
+            const link = document.createElement('a');
+            link.download = `meme-${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            currentImage = null;
+            imageInput.value = '';
+            topTextInput.value = '';
+            bottomTextInput.value = '';
+            canvas.classList.add('hidden');
+            emptyState.classList.remove('hidden');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        // Memastikan font dimuat sebelum menggambar
+        document.fonts.ready.then(() => { if (currentImage) drawMeme(); });
+    </script>
+</body>
+</html>

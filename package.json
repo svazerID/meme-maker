@@ -1,0 +1,26 @@
+{
+  "name": "meme-maker-api",
+  "version": "1.0.0",
+  "description": "API untuk membuat meme menggunakan Canvas dengan dukungan emoji dan auto-resize",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "meme",
+    "canvas",
+    "api",
+    "emoji",
+    "generator"
+  ],
+  "author": "Svazer",
+  "license": "MIT",
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

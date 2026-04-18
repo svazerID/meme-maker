@@ -1,6 +1,5 @@
 const express = require("express");
-const { createCanvas, loadImage, registerFont } = require("canvas");
-const { Resvg } = require("@resvg/resvg-js");
+const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -19,7 +18,8 @@ let fontRegistered = false;
 function ensureFont() {
   if (fontRegistered) return;
   if (fs.existsSync(FONT_PATH)) {
-    registerFont(FONT_PATH, { family: "TitilliumWeb", weight: "900" });
+    // @napi-rs/canvas uses GlobalFonts.registerFromPath
+    GlobalFonts.registerFromPath(FONT_PATH, "TitilliumWeb");
     fontRegistered = true;
     console.log("✅ Font TitilliumWeb-Black registered");
   } else {

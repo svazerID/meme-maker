@@ -24,7 +24,7 @@ function ensureFont() {
   }
 }
 
-// ─── HTTP Fetch Buffer ────────────────────────────────────────────────────────
+// ─── HTTP Fetch ───────────────────────────────────────────────────────────────
 function fetchBuffer(url) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
@@ -32,269 +32,212 @@ function fetchBuffer(url) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return fetchBuffer(res.headers.location).then(resolve).catch(reject);
       }
-      if (res.statusCode !== 200) {
-        return reject(new Error("HTTP " + res.statusCode + " -> " + url));
-      }
+      if (res.statusCode !== 200) return reject(new Error("HTTP " + res.statusCode));
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => resolve(Buffer.concat(chunks)));
       res.on("error", reject);
     });
     req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("timeout: " + url)); });
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
   });
 }
 
-// ─── Emoji CDN URLs ───────────────────────────────────────────────────────────
-//
-// Konversi emoji glyph → codepoint hex string
-// "😂" → "1f602"   |   "❤️" → "2764-fe0f"   |   "👨‍💻" → "1f468-200d-1f4bb"
-//
-function emojiToCodepoint(emoji) {
-  const points = [];
+// ─── Emoji CDN ────────────────────────────────────────────────────────────────
+
+// Codepoint dengan dash separator, tanpa FE0F — untuk Twemoji & Fluent CDN
+// "😂" → "1f602"  |  "❤️" → "2764"  |  "👨‍💻" → "1f468-200d-1f4bb"
+function cpDash(emoji) {
+  const pts = [];
   let i = 0;
   while (i < emoji.length) {
-    const code = emoji.codePointAt(i);
-    points.push(code.toString(16));
-    i += code > 0xFFFF ? 2 : 1;
+    const c = emoji.codePointAt(i);
+    if (c !== 0xFE0F) pts.push(c.toString(16));
+    i += c > 0xFFFF ? 2 : 1;
   }
-  return points.join("-");
+  return pts.join("-");
 }
 
-// Versi tanpa variation selector FE0F (dipakai beberapa CDN)
-function emojiToCodepointNoVS(emoji) {
-  const points = [];
-  let i = 0;
-  while (i < emoji.length) {
-    const code = emoji.codePointAt(i);
-    if (code !== 0xFE0F) points.push(code.toString(16));
-    i += code > 0xFFFF ? 2 : 1;
-  }
-  return points.join("-");
+// Codepoint dengan underscore separator, tanpa FE0F — untuk Noto Emoji
+// "😂" → "1f602"  |  "👨‍💻" → "1f468_200d_1f4bb"
+function cpUnder(emoji) {
+  return cpDash(emoji).replace(/-/g, "_");
 }
 
-// Kandidat URL per emoji — dicoba urut dari atas, pertama yang berhasil dipakai
-function emojiUrlCandidates(emoji) {
-  const cp    = emojiToCodepoint(emoji);       // dengan FE0F
-  const cpNvs = emojiToCodepointNoVS(emoji);   // tanpa FE0F
+// Noto Emoji via jsDelivr dari GitHub googlefonts/noto-emoji
+// Format: emoji_u{codepoint_underscore}.png (size 128px)
+function notoUrl(emoji) {
+  return "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/png/128/emoji_u" + cpUnder(emoji) + ".png";
+}
+
+// Twemoji fallback
+function twemojiUrl(emoji) {
+  return "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/" + cpDash(emoji) + ".png";
+}
+
+// Kandidat URL diurutkan: Noto (Android) → Twemoji fallback
+function emojiCandidates(emoji) {
+  const dash  = cpDash(emoji);
+  const under = cpUnder(emoji);
+
+  // Beberapa emoji punya FE0F di codepoint — buat versi dengan FE0F juga
+  const dashFull = (() => {
+    const pts = [];
+    let i = 0;
+    while (i < emoji.length) {
+      const c = emoji.codePointAt(i);
+      pts.push(c.toString(16));
+      i += c > 0xFFFF ? 2 : 1;
+    }
+    return pts.join("-");
+  })();
+  const underFull = dashFull.replace(/-/g, "_");
 
   return [
-    // 1. Fluent CDN (Microsoft Fluent UI, mirip Apple, 100x100)
-    `https://emoji.fluent-cdn.com/1.0.0/100x100/${cp}.png`,
-    `https://emoji.fluent-cdn.com/1.0.0/100x100/${cpNvs}.png`,
-
-    // 2. Fluent 3D via jsDelivr (Twemoji-compatible format, 3D style)
-    `https://cdn.jsdelivr.net/gh/ehne/fluentui-twemoji-3d@main/export/3D_png/${cpNvs}.png`,
-    `https://cdn.jsdelivr.net/gh/ehne/fluentui-twemoji-3d@main/export/3D_png/${cp}.png`,
-
-    // 3. Twemoji (fallback terakhir)
-    `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${cpNvs}.png`,
-    `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${cp}.png`,
+    // 1. Noto Color Emoji (Google / Android style) — tanpa FE0F
+    "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/png/128/emoji_u" + under + ".png",
+    // 2. Noto — dengan FE0F (beberapa emoji butuh ini)
+    "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/png/128/emoji_u" + underFull + ".png",
+    // 3. Twemoji fallback — tanpa FE0F
+    "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/" + dash + ".png",
+    // 4. Twemoji fallback — dengan FE0F
+    "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/" + dashFull + ".png",
   ];
 }
 
-// Cache: emoji string → loadImage result (atau null jika gagal semua)
 const emojiCache = new Map();
 
 async function getEmojiImage(emoji) {
   if (emojiCache.has(emoji)) return emojiCache.get(emoji);
 
-  const candidates = emojiUrlCandidates(emoji);
-  for (const url of candidates) {
+  for (const url of emojiCandidates(emoji)) {
     try {
       const buf = await fetchBuffer(url);
       const img = await loadImage(buf);
-      console.log("✅ Emoji loaded: " + emoji + " <- " + url);
+      console.log("✅ emoji " + emoji + " <- " + new URL(url).hostname);
       emojiCache.set(emoji, img);
       return img;
-    } catch (e) {
-      // coba kandidat berikutnya
-    }
+    } catch (_) { /* coba berikutnya */ }
   }
 
-  console.warn("❌ Emoji not found: " + emoji + " (" + emojiToCodepoint(emoji) + ")");
+  console.warn("❌ emoji not found: " + emoji + " (" + cpDash(emoji) + ")");
   emojiCache.set(emoji, null);
   return null;
 }
 
 // ─── Text Segmentation ────────────────────────────────────────────────────────
-// Memisahkan teks biasa dan emoji menjadi array segment { type, value }
 
 const EMOJI_RE = /(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F)(?:\u200D(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F))*[\uFE0F\u20E3]?|\p{Regional_Indicator}{2}/gu;
 
 function segmentText(text) {
-  const segments = [];
-  let lastIndex = 0;
+  const out = [];
+  let last = 0;
   const re = new RegExp(EMOJI_RE.source, "gu");
-  let match;
-  while ((match = re.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const t = text.slice(lastIndex, match.index);
-      if (t) segments.push({ type: "text", value: t });
-    }
-    segments.push({ type: "emoji", value: match[0] });
-    lastIndex = match.index + match[0].length;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ type: "text", value: text.slice(last, m.index) });
+    out.push({ type: "emoji", value: m[0] });
+    last = m.index + m[0].length;
   }
-  if (lastIndex < text.length) {
-    const t = text.slice(lastIndex);
-    if (t) segments.push({ type: "text", value: t });
-  }
-  return segments;
+  if (last < text.length) out.push({ type: "text", value: text.slice(last) });
+  return out.filter((s) => s.value);
 }
 
-// ─── Layout Helpers ───────────────────────────────────────────────────────────
+// ─── Layout ───────────────────────────────────────────────────────────────────
 
-function setFont(ctx, fontSize) {
-  ctx.font = '900 ' + fontSize + 'px TitilliumWeb, Impact, "Arial Black", sans-serif';
+function setFont(ctx, fs) {
+  ctx.font = '900 ' + fs + 'px TitilliumWeb, Impact, "Arial Black", sans-serif';
 }
 
-function tokenWidth(ctx, seg, fontSize) {
-  if (seg.type === "emoji") return fontSize * 1.15; // emoji sedikit lebih lebar
-  setFont(ctx, fontSize);
+function segW(ctx, seg, fs) {
+  if (seg.type === "emoji") return fs * 1.2;
+  setFont(ctx, fs);
   return ctx.measureText(seg.value).width;
 }
 
-// Word-wrap: kembalikan array of lines, tiap line = array of segments
-function wrapSegments(ctx, segments, maxWidth, fontSize) {
+function wrapSegs(ctx, segs, maxW, fs) {
   const lines = [[]];
-  let curW = 0;
-
-  for (const seg of segments) {
+  let cur = 0;
+  for (const seg of segs) {
     if (seg.type === "text") {
-      // pecah per kata (pertahankan spasi)
-      const words = seg.value.split(/(\s+)/);
-      for (const word of words) {
+      for (const word of seg.value.split(/(\s+)/)) {
         if (!word) continue;
-        setFont(ctx, fontSize);
+        setFont(ctx, fs);
         const ww = ctx.measureText(word).width;
-        if (word.trim() && curW + ww > maxWidth && curW > 0) {
-          lines.push([]);
-          curW = 0;
-        }
+        if (word.trim() && cur + ww > maxW && cur > 0) { lines.push([]); cur = 0; }
         const last = lines[lines.length - 1];
-        if (last.length > 0 && last[last.length - 1].type === "text") {
-          last[last.length - 1].value += word;
-        } else {
-          last.push({ type: "text", value: word });
-        }
-        curW += ww;
+        if (last.length && last[last.length - 1].type === "text") last[last.length - 1].value += word;
+        else last.push({ type: "text", value: word });
+        cur += ww;
       }
     } else {
-      const ew = fontSize * 1.15;
-      if (curW + ew > maxWidth && curW > 0) {
-        lines.push([]);
-        curW = 0;
-      }
+      const ew = fs * 1.2;
+      if (cur + ew > maxW && cur > 0) { lines.push([]); cur = 0; }
       lines[lines.length - 1].push(seg);
-      curW += ew;
+      cur += ew;
     }
   }
-  return lines.filter((l) => l.length > 0);
+  return lines.filter((l) => l.length);
 }
 
-function calcLineWidth(ctx, line, fontSize) {
-  let w = 0;
-  for (const seg of line) w += tokenWidth(ctx, seg, fontSize);
-  return w;
+function lineW(ctx, line, fs) {
+  return line.reduce((s, seg) => s + segW(ctx, seg, fs), 0);
 }
 
-// Auto-resize: cari fontSize terbesar yang masih muat
-function calcFontSize(ctx, segments, maxWidth, maxHeight, startSize, minSize) {
-  let fs = startSize;
-  while (fs >= minSize) {
-    const lines = wrapSegments(ctx, segments, maxWidth, fs);
-    const totalH = lines.length * fs * 1.35;
-    let ok = totalH <= maxHeight;
-    if (ok) {
-      for (const line of lines) {
-        if (calcLineWidth(ctx, line, fs) > maxWidth) { ok = false; break; }
-      }
-    }
-    if (ok) return { fontSize: fs, lines };
-    fs -= 2;
+function fitFont(ctx, segs, maxW, maxH, start, min) {
+  for (let fs = start; fs >= min; fs -= 2) {
+    const lines = wrapSegs(ctx, segs, maxW, fs);
+    if (lines.length * fs * 1.35 <= maxH && lines.every((l) => lineW(ctx, l, fs) <= maxW))
+      return { fs, lines };
   }
-  return { fontSize: minSize, lines: wrapSegments(ctx, segments, maxWidth, minSize) };
+  return { fs: min, lines: wrapSegs(ctx, segs, maxW, min) };
 }
 
-// ─── Draw ─────────────────────────────────────────────────────────────────────
-
-async function drawLine(ctx, line, startX, baselineY, fontSize, fillColor, strokeColor, strokeWidth) {
-  let x = startX;
+async function drawLine(ctx, line, x, y, fs, fill, stroke, sw) {
   for (const seg of line) {
     if (seg.type === "emoji") {
       const img = await getEmojiImage(seg.value);
-      const eSize = fontSize * 1.15;
-      if (img) {
-        // sejajarkan vertically: top emoji = baseline - cap-height (~88%)
-        const emojiTop = baselineY - fontSize * 0.9;
-        ctx.drawImage(img, x, emojiTop, eSize, eSize);
-      }
-      x += eSize;
+      const sz = fs * 1.2;
+      if (img) ctx.drawImage(img, x, y - fs * 0.92, sz, sz);
+      x += sz;
     } else {
-      setFont(ctx, fontSize);
-      if (strokeWidth > 0) {
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = strokeWidth;
-        ctx.lineJoin = "round";
-        ctx.strokeText(seg.value, x, baselineY);
+      setFont(ctx, fs);
+      if (sw > 0) {
+        ctx.strokeStyle = stroke; ctx.lineWidth = sw; ctx.lineJoin = "round";
+        ctx.strokeText(seg.value, x, y);
       }
-      ctx.fillStyle = fillColor;
-      ctx.fillText(seg.value, x, baselineY);
-      setFont(ctx, fontSize);
+      ctx.fillStyle = fill;
+      ctx.fillText(seg.value, x, y);
+      setFont(ctx, fs);
       x += ctx.measureText(seg.value).width;
     }
   }
 }
 
-async function drawTextBlock(ctx, opts) {
-  const {
-    text, x, y, maxWidth, maxHeight,
-    align = "center",
-    fillColor = "#FFFFFF",
-    strokeColor = "#000000",
-    strokeWidth = 5,
-    startFontSize = 60,
-    minFontSize = 14,
-    position = "bottom",
-    canvasWidth,
-    canvasHeight,
-  } = opts;
+async function drawBlock(ctx, opts) {
+  const { text, x, y, maxW, maxH, align = "center", fill = "#FFF", stroke = "#000", sw = 5,
+          startFs = 60, minFs = 14, pos = "bottom", cW, cH } = opts;
+  if (!text?.trim()) return;
 
-  if (!text || !text.trim()) return;
-
-  const segments = segmentText(text);
-
-  // Pre-fetch semua emoji secara paralel sebelum render
-  await Promise.all(
-    segments.filter((s) => s.type === "emoji").map((s) => getEmojiImage(s.value))
-  );
+  const segs = segmentText(text);
+  await Promise.all(segs.filter((s) => s.type === "emoji").map((s) => getEmojiImage(s.value)));
 
   ctx.textBaseline = "alphabetic";
-  const { fontSize, lines } = calcFontSize(ctx, segments, maxWidth, maxHeight, startFontSize, minFontSize);
+  const { fs, lines } = fitFont(ctx, segs, maxW, maxH, startFs, minFs);
+  const lh = fs * 1.35;
+  const totalH = lines.length * lh;
 
-  const lineH   = fontSize * 1.35;
-  const totalH  = lines.length * lineH;
-
-  // Hitung Y awal (baseline baris pertama)
-  let startY;
-  if (position === "top") {
-    startY = y + fontSize;
-  } else if (position === "bottom") {
-    startY = canvasHeight - y - totalH + fontSize;
-  } else if (position === "center") {
-    startY = (canvasHeight - totalH) / 2 + fontSize;
-  } else {
-    startY = y + fontSize;
-  }
+  const startY = pos === "top"    ? y + fs
+               : pos === "bottom" ? cH - y - totalH + fs
+               : pos === "center" ? (cH - totalH) / 2 + fs
+               : y + fs;
 
   for (let i = 0; i < lines.length; i++) {
-    const lw = calcLineWidth(ctx, lines[i], fontSize);
-    let lineX;
-    if (align === "center")     lineX = x + (maxWidth - lw) / 2;
-    else if (align === "right") lineX = x + maxWidth - lw;
-    else                        lineX = x;
-
-    await drawLine(ctx, lines[i], lineX, startY + i * lineH, fontSize, fillColor, strokeColor, strokeWidth);
+    const lw = lineW(ctx, lines[i], fs);
+    const lx = align === "center" ? x + (maxW - lw) / 2
+             : align === "right"  ? x + maxW - lw
+             : x;
+    await drawLine(ctx, lines[i], lx, startY + i * lh, fs, fill, stroke, sw);
   }
 }
 
@@ -303,145 +246,91 @@ async function drawTextBlock(ctx, opts) {
 app.get("/", (req, res) => {
   res.json({
     name: "Meme Maker API",
-    version: "3.0.0",
-    description: "TitilliumWeb-Black + Microsoft FluentUI Emoji (3D, mirip Apple) + auto-resize",
-    emoji_source: "Microsoft Fluent UI Emoji via fluent-cdn.com (fallback: Twemoji)",
-    endpoints: {
-      "GET /health": "Health check",
-      "POST /meme":  "Generate meme via JSON body",
-      "GET /meme":   "Generate meme via query params",
-    },
+    version: "4.0.0",
+    description: "TitilliumWeb-Black font + Noto Color Emoji (Android/Google) + auto-resize",
+    emoji: "Noto Color Emoji by Google (Apache 2.0) — same as Android & WhatsApp Android",
+    fallback: "Twemoji jika Noto tidak tersedia",
+    endpoints: { "GET /health": "health", "POST /meme": "JSON body", "GET /meme": "query params" },
     params: {
-      imageUrl:    "string  — background image URL (optional)",
-      topText:     "string  — teks atas, support emoji 😂🔥✅",
-      bottomText:  "string  — teks bawah, support emoji",
-      width:       "number  — default 800",
-      height:      "number  — default 600",
-      bgColor:     "string  — default #000000 (dipakai jika tidak ada imageUrl)",
-      textColor:   "string  — default #FFFFFF",
-      strokeColor: "string  — default #000000",
-      strokeWidth: "number  — default 5",
-      fontSize:    "number  — default 60 (auto-resize jika teks panjang)",
-      format:      "png | jpeg  — default png",
-      quality:     "number 1-100  — default 90 (khusus jpeg)",
+      imageUrl: "URL gambar background (optional)",
+      topText: "teks atas — emoji 😂🔥✅🎉",
+      bottomText: "teks bawah",
+      width: 800, height: 600,
+      bgColor: "#000000",
+      textColor: "#FFFFFF", strokeColor: "#000000", strokeWidth: 5,
+      fontSize: 60, format: "png|jpeg", quality: 90,
     },
   });
 });
 
 app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    font: fontRegistered ? "TitilliumWeb-Black" : "fallback",
-    emojiCached: emojiCache.size,
-    emojiSource: "Microsoft FluentUI (fluent-cdn.com) + fallback Twemoji",
-  });
+  res.json({ status: "ok", font: fontRegistered ? "TitilliumWeb-Black" : "fallback", emojiCached: emojiCache.size });
 });
 
-// ─── Core Generator ───────────────────────────────────────────────────────────
+// ─── Generator ────────────────────────────────────────────────────────────────
 
-async function generateMeme(params) {
+async function generateMeme(p) {
   ensureFont();
-
   const {
-    imageUrl    = null,
-    topText     = "",
-    bottomText  = "",
-    width       = 800,
-    height      = 600,
-    bgColor     = "#000000",
-    textColor   = "#FFFFFF",
-    strokeColor = "#000000",
-    strokeWidth = 5,
-    fontSize    = 60,
-    format      = "png",
-    quality     = 90,
-  } = params;
+    imageUrl = null, topText = "", bottomText = "",
+    width = 800, height = 600, bgColor = "#000000",
+    textColor = "#FFFFFF", strokeColor = "#000000",
+    strokeWidth = 5, fontSize = 60, format = "png", quality = 90,
+  } = p;
 
   const W = Math.min(Math.max(parseInt(width)  || 800, 100), 2000);
   const H = Math.min(Math.max(parseInt(height) || 600, 100), 2000);
-
   const canvas = createCanvas(W, H);
-  const ctx    = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d");
 
-  // ── Background ──
   if (imageUrl) {
     try {
-      const buf = await fetchBuffer(imageUrl);
-      const img = await loadImage(buf);
-      const scale = Math.max(W / img.width, H / img.height);
-      const sw = img.width * scale, sh = img.height * scale;
-      ctx.drawImage(img, (W - sw) / 2, (H - sh) / 2, sw, sh);
+      const img = await loadImage(await fetchBuffer(imageUrl));
+      const sc = Math.max(W / img.width, H / img.height);
+      ctx.drawImage(img, (W - img.width * sc) / 2, (H - img.height * sc) / 2, img.width * sc, img.height * sc);
     } catch (e) {
-      console.warn("BG image failed:", e.message);
-      ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, W, H);
+      console.warn("BG failed:", e.message);
+      ctx.fillStyle = bgColor; ctx.fillRect(0, 0, W, H);
     }
   } else {
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = bgColor; ctx.fillRect(0, 0, W, H);
   }
 
-  const pad    = Math.floor(W * 0.04);
-  const maxTW  = W - pad * 2;
-  const maxTH  = H * 0.38;
-  const fs     = parseInt(fontSize)    || 60;
-  const sw2    = parseInt(strokeWidth) ?? 5;
-
+  const pad = Math.floor(W * 0.04);
   const shared = {
-    x: pad, maxWidth: maxTW, maxHeight: maxTH,
-    align: "center",
-    fillColor: textColor, strokeColor, strokeWidth: sw2,
-    startFontSize: fs, minFontSize: 14,
-    canvasWidth: W, canvasHeight: H,
+    x: pad, maxW: W - pad * 2, maxH: H * 0.38,
+    align: "center", fill: textColor, stroke: strokeColor,
+    sw: parseInt(strokeWidth) ?? 5, startFs: parseInt(fontSize) || 60,
+    minFs: 14, cW: W, cH: H,
   };
 
-  await drawTextBlock(ctx, { ...shared, text: topText,    y: pad, position: "top"    });
-  await drawTextBlock(ctx, { ...shared, text: bottomText, y: pad, position: "bottom" });
+  await drawBlock(ctx, { ...shared, text: topText,    y: pad, pos: "top"    });
+  await drawBlock(ctx, { ...shared, text: bottomText, y: pad, pos: "bottom" });
 
   if (format === "jpeg" || format === "jpg") {
-    const buf = await canvas.toBuffer("image/jpeg", Math.min(Math.max(parseInt(quality) || 90, 1), 100));
-    return { buffer: buf, contentType: "image/jpeg" };
+    return { buffer: await canvas.toBuffer("image/jpeg", Math.min(Math.max(parseInt(quality) || 90, 1), 100)), contentType: "image/jpeg" };
   }
-  const buf = await canvas.toBuffer("image/png");
-  return { buffer: buf, contentType: "image/png" };
+  return { buffer: await canvas.toBuffer("image/png"), contentType: "image/png" };
 }
-
-// ─── Endpoints ────────────────────────────────────────────────────────────────
 
 app.post("/meme", async (req, res) => {
   try {
     const r = await generateMeme(req.body);
-    res.set("Content-Type",   r.contentType)
-       .set("Content-Length", r.buffer.length)
-       .set("Cache-Control",  "public, max-age=3600")
-       .send(r.buffer);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e.message });
-  }
+    res.set("Content-Type", r.contentType).set("Content-Length", r.buffer.length)
+       .set("Cache-Control", "public, max-age=3600").send(r.buffer);
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
 });
 
 app.get("/meme", async (req, res) => {
   try {
     const r = await generateMeme(req.query);
-    res.set("Content-Type",   r.contentType)
-       .set("Content-Length", r.buffer.length)
-       .set("Cache-Control",  "public, max-age=3600")
-       .send(r.buffer);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e.message });
-  }
+    res.set("Content-Type", r.contentType).set("Content-Length", r.buffer.length)
+       .set("Cache-Control", "public, max-age=3600").send(r.buffer);
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
 });
 
-// ─── Server ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-
 if (process.env.NODE_ENV !== "production") {
-  app.listen(PORT, () => {
-    console.log("🚀 Meme Maker API v3 — http://localhost:" + PORT);
-    ensureFont();
-  });
+  app.listen(PORT, () => { console.log("🚀 http://localhost:" + PORT); ensureFont(); });
 }
-
 module.exports = app;

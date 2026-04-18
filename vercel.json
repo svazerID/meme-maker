@@ -1,6 +1,6 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/meme", "destination": "/api/meme.js" }
+    { "source": "/api/meme", "destination": "/server.js" }
   ]
 }
